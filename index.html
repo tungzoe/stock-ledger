@@ -176,6 +176,16 @@
 </style>
 </head>
 <body>
+<div id="lockScreen" style="position:fixed;inset:0;z-index:999;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#3C3630 0%,#2B2822 100%);padding:20px;">
+  <div style="background:#FBF8F2;border-radius:20px;padding:32px 28px;max-width:340px;width:100%;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,0.3);">
+    <div style="font-size:15px;color:#7A7364;letter-spacing:2px;margin-bottom:6px;">股票交易帳本</div>
+    <div style="font-size:18px;font-weight:700;color:#2B2B28;margin-bottom:20px;">請輸入密碼</div>
+    <input id="pinInput" type="tel" inputmode="numeric" maxlength="4" autocomplete="off"
+      style="width:100%;text-align:center;font-size:32px;letter-spacing:16px;padding:14px 0;border:2px solid #DFD6BE;border-radius:12px;font-family:ui-monospace,monospace;">
+    <div id="pinError" style="color:#B23A2E;font-size:13px;margin-top:10px;min-height:18px;"></div>
+    <button onclick="submitPin()" style="width:100%;margin-top:12px;padding:14px;font-size:17px;font-weight:700;border:none;border-radius:12px;background:#9C7A3C;color:#fff;">確認</button>
+  </div>
+</div>
 <div id="app">
 
   <header class="cover">
@@ -644,6 +654,40 @@ function clearAll(){
   showToast('已清除全部資料');
   goTab('home');
 }
+
+/* ===== 密碼鎖 ===== */
+const PIN_HASH = 'e81d47bc1914daacdfe3670959ae7f749fd47976471fc68ed00041f6150c80b6';
+async function sha256Hex(str){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function showPinError(msg){
+  document.getElementById('pinError').textContent = msg;
+}
+async function submitPin(){
+  const val = document.getElementById('pinInput').value.trim();
+  if(val.length !== 4){ showPinError('請輸入4位數密碼'); return; }
+  const hash = await sha256Hex(val);
+  if(hash === PIN_HASH){
+    localStorage.setItem('stock_ledger_unlocked', '1');
+    document.getElementById('lockScreen').style.display = 'none';
+  } else {
+    showPinError('密碼錯誤，請再試一次');
+    document.getElementById('pinInput').value = '';
+    document.getElementById('pinInput').focus();
+  }
+}
+function checkLock(){
+  const locked = localStorage.getItem('stock_ledger_unlocked') !== '1';
+  document.getElementById('lockScreen').style.display = locked ? 'flex' : 'none';
+  if(locked){
+    document.getElementById('pinInput').addEventListener('keydown', e=>{
+      if(e.key === 'Enter') submitPin();
+    });
+    setTimeout(()=>document.getElementById('pinInput').focus(), 200);
+  }
+}
+checkLock();
 
 /* ===== 初始化 ===== */
 document.getElementById('f_date').value = todayStr();
