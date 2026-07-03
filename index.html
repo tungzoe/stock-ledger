@@ -118,6 +118,7 @@
   .seg button{flex:1;padding:13px;font-size:17px;font-weight:700;border:none;background:#fff;color:var(--ink-soft);}
   .seg button.on-buy{background:var(--seal-soft);color:var(--seal);}
   .seg button.on-sell{background:var(--jade-soft);color:var(--jade);}
+  .seg button.on-dividend{background:var(--brass);color:#fff;}
   .hint{font-size:12px;color:var(--ink-soft);margin-top:6px;line-height:1.5;}
   .field-row{display:flex;gap:10px;}
   .field-row > div{flex:1;}
@@ -144,6 +145,7 @@
   .tag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:20px;font-weight:700;margin-right:6px;}
   .tag.buy{background:var(--brass-soft);color:var(--brass-dark);}
   .tag.sell{background:var(--jade-soft);color:var(--jade);}
+  .tag.dividend{background:var(--brass);color:#fff;}
 
   /* ===== 庫存 ===== */
   .hold-row{display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px dashed var(--line);}
@@ -234,6 +236,7 @@
         <div class="seg">
           <button type="button" id="segBuy" onclick="setType('buy')">買進</button>
           <button type="button" id="segSell" onclick="setType('sell')">賣出</button>
+          <button type="button" id="segDividend" onclick="setType('dividend')">股息</button>
         </div>
 
         <label>股票代號</label>
@@ -243,7 +246,7 @@
         <label>股票名稱（選填）</label>
         <input type="text" id="f_name" placeholder="例如 台積電">
 
-        <div class="field-row">
+        <div class="field-row" id="qtyPriceWrap">
           <div>
             <label>股數</label>
             <input type="number" id="f_qty" placeholder="0" inputmode="decimal">
@@ -254,7 +257,7 @@
           </div>
         </div>
 
-        <div class="field-row">
+        <div class="field-row" id="feeTaxWrap">
           <div>
             <label>手續費</label>
             <input type="number" id="f_fee" placeholder="0" inputmode="decimal">
@@ -264,7 +267,13 @@
             <input type="number" id="f_tax" placeholder="0" inputmode="decimal">
           </div>
         </div>
-        <p class="hint">損益會自動用「平均成本法」計算：賣出時系統會自動比對這檔股票之前買進的平均成本，不用自己算。</p>
+
+        <div id="dividendWrap" style="display:none;">
+          <label>股息金額（實收，元）</label>
+          <input type="number" id="f_dividend" placeholder="0" inputmode="decimal">
+        </div>
+
+        <p class="hint" id="addHint">損益會自動用「平均成本法」計算：賣出時系統會自動比對這檔股票之前買進的平均成本，不用自己算。</p>
 
         <div style="margin-top:18px;">
           <button class="btn btn-primary" onclick="submitTx()">儲存這筆交易</button>
@@ -378,7 +387,14 @@ function setType(t){
   currentType = t;
   document.getElementById('segBuy').className = t==='buy' ? 'on-buy' : '';
   document.getElementById('segSell').className = t==='sell' ? 'on-sell' : '';
+  document.getElementById('segDividend').className = t==='dividend' ? 'on-dividend' : '';
   document.getElementById('taxWrap').style.display = t==='sell' ? 'block' : 'none';
+  document.getElementById('qtyPriceWrap').style.display = t==='dividend' ? 'none' : 'flex';
+  document.getElementById('feeTaxWrap').style.display = t==='dividend' ? 'none' : 'flex';
+  document.getElementById('dividendWrap').style.display = t==='dividend' ? 'block' : 'none';
+  document.getElementById('addHint').textContent = t==='dividend'
+    ? '股息不會影響庫存股數與成本，只會計入當天與當月的損益統計。'
+    : '損益會自動用「平均成本法」計算：賣出時系統會自動比對這檔股票之前買進的平均成本，不用自己算。';
 }
 
 /* ===== 核心計算：平均成本法 ===== */
@@ -399,7 +415,7 @@ function computeAll(){
     if(tx.type === 'buy'){
       h.qty += tx.qty;
       h.cost += tx.qty * tx.price + (tx.fee||0);
-    } else {
+    } else if(tx.type === 'sell'){
       const avgCost = h.qty > 0 ? h.cost / h.qty : 0;
       if(tx.qty > h.qty) warning = true;
       const soldQty = Math.min(tx.qty, h.qty);
@@ -408,6 +424,9 @@ function computeAll(){
       realized = proceeds - costOfSold;
       h.qty = Math.max(0, h.qty - tx.qty);
       h.cost = Math.max(0, h.cost - costOfSold);
+      dailyPL[tx.date] = (dailyPL[tx.date]||0) + realized;
+    } else if(tx.type === 'dividend'){
+      realized = tx.amount || 0;
       dailyPL[tx.date] = (dailyPL[tx.date]||0) + realized;
     }
     holdings[tx.code] = h;
@@ -484,21 +503,33 @@ function submitTx(){
   const date = document.getElementById('f_date').value || todayStr();
   const code = document.getElementById('f_code').value.trim();
   const name = document.getElementById('f_name').value.trim();
-  const qty = parseFloat(document.getElementById('f_qty').value);
-  const price = parseFloat(document.getElementById('f_price').value);
-  const fee = parseFloat(document.getElementById('f_fee').value) || 0;
-  const tax = currentType==='sell' ? (parseFloat(document.getElementById('f_tax').value) || 0) : 0;
-
   if(!code){ showToast('請輸入股票代號'); return; }
-  if(!qty || qty<=0){ showToast('請輸入股數'); return; }
-  if(!price || price<=0){ showToast('請輸入成交價'); return; }
+
+  let tx;
+  if(currentType === 'dividend'){
+    const amount = parseFloat(document.getElementById('f_dividend').value);
+    if(!amount || amount<=0){ showToast('請輸入股息金額'); return; }
+    tx = {
+      id: Date.now()+'-'+Math.random().toString(36).slice(2,7),
+      createdAt: Date.now(),
+      date, code, name, type: 'dividend', amount
+    };
+  } else {
+    const qty = parseFloat(document.getElementById('f_qty').value);
+    const price = parseFloat(document.getElementById('f_price').value);
+    const fee = parseFloat(document.getElementById('f_fee').value) || 0;
+    const tax = currentType==='sell' ? (parseFloat(document.getElementById('f_tax').value) || 0) : 0;
+    if(!qty || qty<=0){ showToast('請輸入股數'); return; }
+    if(!price || price<=0){ showToast('請輸入成交價'); return; }
+    tx = {
+      id: Date.now()+'-'+Math.random().toString(36).slice(2,7),
+      createdAt: Date.now(),
+      date, code, name, type: currentType, qty, price, fee, tax
+    };
+  }
 
   const list = loadTx();
-  list.push({
-    id: Date.now()+'-'+Math.random().toString(36).slice(2,7),
-    createdAt: Date.now(),
-    date, code, name, type: currentType, qty, price, fee, tax
-  });
+  list.push(tx);
   saveTx(list);
 
   document.getElementById('f_code').value='';
@@ -507,6 +538,7 @@ function submitTx(){
   document.getElementById('f_price').value='';
   document.getElementById('f_fee').value='';
   document.getElementById('f_tax').value='';
+  document.getElementById('f_dividend').value='';
 
   populateCodeList();
   showToast('已儲存這筆交易');
@@ -544,13 +576,23 @@ function renderHome(){
   if(todayTx.length===0){
     box.innerHTML = '<div class="empty">今天還沒有輸入交易</div>';
   } else {
-    box.innerHTML = todayTx.slice().reverse().map(t=>`
+    box.innerHTML = todayTx.slice().reverse().map(t=>{
+      if(t.type === 'dividend'){
+        return `
+      <div class="tx-row">
+        <span class="tag dividend">股息</span>
+        <b>${t.code}${t.name? ' '+t.name:''}</b>
+        <span class="mono" style="float:right;color:var(--seal);">+${fmt(t.realized)}</span>
+      </div>`;
+      }
+      return `
       <div class="tx-row">
         <span class="tag ${t.type}">${t.type==='buy'?'買進':'賣出'}</span>
         <b>${t.code}${t.name? ' '+t.name:''}</b>
         <span class="mono"> ${t.qty}股 @${t.price}</span>
         ${t.realized!==null ? `<span class="mono" style="float:right;color:${t.realized>=0?'var(--seal)':'var(--jade)'}">${t.realized>=0?'+':''}${fmt(t.realized)}</span>` : ''}
-      </div>`).join('');
+      </div>`;
+    }).join('');
   }
 }
 
@@ -577,7 +619,19 @@ function renderHistory(){
           <span class="pl ${cls} mono">${pl===0?'—':(pl>0?'+':'')+fmt(pl)}</span>
         </div>
         <div class="day-body ${isOpen?'open':''}" id="day-${d}">
-          ${dayTx.map(t=>`
+          ${dayTx.map(t=>{
+            if(t.type === 'dividend'){
+              return `
+            <div class="tx-detail">
+              <div>
+                <span class="tag dividend">股息</span>
+                <b>${t.code}${t.name?' '+t.name:''}</b>
+                <div class="meta" style="color:var(--seal);font-weight:700;">股息收入：+${fmt(t.realized)}</div>
+              </div>
+              <button class="del" onclick="deleteTx('${t.id}')">刪除</button>
+            </div>`;
+            }
+            return `
             <div class="tx-detail">
               <div>
                 <span class="tag ${t.type}">${t.type==='buy'?'買進':'賣出'}</span>
@@ -587,7 +641,8 @@ function renderHistory(){
                 ${t.warning ? `<div class="meta" style="color:var(--seal);">⚠ 賣出股數超過當時庫存，損益僅供參考</div>` : ''}
               </div>
               <button class="del" onclick="deleteTx('${t.id}')">刪除</button>
-            </div>`).join('')}
+            </div>`;
+          }).join('')}
         </div>
       </div>`;
   }).join('');
