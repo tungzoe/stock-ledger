@@ -302,12 +302,14 @@
       <div class="card">
         <h2>批次匯入舊交易紀錄</h2>
         <p class="hint">
-          要補登以前已經買賣過的紀錄時很好用，不用一筆一筆點。<br>
+          要補登以前已經買賣過或領過股息的紀錄時很好用，不用一筆一筆點。<br>
           每行一筆，用逗號分隔，格式如下：<br>
-          <b>日期,代號,名稱,買或賣,股數,成交價,手續費,交易稅</b><br>
+          <b>買賣：日期,代號,名稱,買或賣,股數,成交價,手續費,交易稅</b><br>
+          <b>股息：日期,代號,名稱,息,股息金額</b><br>
           例如：<br>
           <span class="mono">2026-03-10,2330,台積電,買,1000,580,83,0</span><br>
           <span class="mono">2026-05-02,2330,台積電,賣,1000,610,87,183</span><br>
+          <span class="mono">2026-07-15,2330,台積電,息,2500</span><br>
           ・名稱可留白　・買進的交易稅可留 0　・同一天有多筆時，請照實際交易先後順序，一行一行貼上去（越早發生的放越上面）
         </p>
         <textarea id="bulkInput" rows="6" style="width:100%;padding:12px;font-size:14px;border:2px solid var(--line);border-radius:11px;font-family:ui-monospace,monospace;" placeholder="2026-03-10,2330,台積電,買,1000,580,83,0"></textarea>
@@ -447,13 +449,29 @@ function bulkImport(){
 
   lines.forEach((line, idx)=>{
     const cols = line.split(',').map(c=>c.trim());
-    if(cols.length < 6){ fail.push(idx+1); return; }
-    const [date, code, name, typeRaw, qtyRaw, priceRaw, feeRaw, taxRaw] = cols;
+    if(cols.length < 5){ fail.push(idx+1); return; }
+    const [date, code, name, typeRaw, ...rest] = cols;
 
     if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){ fail.push(idx+1); return; }
     if(!code){ fail.push(idx+1); return; }
-    const type = /賣|卖|sell/i.test(typeRaw) ? 'sell' : (/買|买|buy/i.test(typeRaw) ? 'buy' : null);
+    const type = /息|dividend/i.test(typeRaw) ? 'dividend'
+      : /賣|卖|sell/i.test(typeRaw) ? 'sell'
+      : /買|买|buy/i.test(typeRaw) ? 'buy' : null;
     if(!type){ fail.push(idx+1); return; }
+
+    if(type === 'dividend'){
+      const amount = parseFloat(rest[0]);
+      if(!amount || amount<=0){ fail.push(idx+1); return; }
+      list.push({
+        id: (base+idx)+'-'+Math.random().toString(36).slice(2,7),
+        createdAt: base + idx, // 保留貼上時的先後順序
+        date, code, name: name||'', type, amount
+      });
+      ok++;
+      return;
+    }
+
+    const [qtyRaw, priceRaw, feeRaw, taxRaw] = rest;
     const qty = parseFloat(qtyRaw), price = parseFloat(priceRaw);
     if(!qty || qty<=0 || !price || price<=0){ fail.push(idx+1); return; }
     const fee = parseFloat(feeRaw) || 0;
