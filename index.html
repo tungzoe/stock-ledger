@@ -148,10 +148,30 @@
   .tag.dividend{background:var(--brass);color:#fff;}
 
   /* ===== 庫存 ===== */
-  .hold-row{display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px dashed var(--line);}
-  .hold-row:last-child{border-bottom:none;}
-  .hold-row .code{font-weight:700;}
-  .hold-row .r{text-align:right;font-size:13px;color:var(--ink-soft);}
+  .pos{color:var(--seal);} .neg{color:var(--jade);}
+  .sum-line{display:flex;justify-content:space-between;align-items:baseline;padding:7px 0;border-bottom:1px dashed var(--line);}
+  .sum-line:last-child{border-bottom:none;}
+  .sum-line .k{font-size:13px;color:var(--ink-soft);}
+  .sum-line .v{font-size:18px;font-weight:800;}
+  .sum-line .v.big{font-size:24px;}
+  .sum-line .v .pct{font-size:12px;font-weight:600;margin-left:6px;}
+  .sum-note{font-size:11px;color:var(--ink-soft);margin-top:8px;line-height:1.5;}
+  .hold-item{padding:12px 0;border-bottom:1px dashed var(--line);}
+  .hold-item:last-child{border-bottom:none;}
+  .hi-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;}
+  .hi-name{font-size:15px;}
+  .hi-name .code{font-weight:700;}
+  .hi-unrl{font-weight:800;font-size:16px;text-align:right;white-space:nowrap;}
+  .hi-unrl .pct{font-size:12px;font-weight:600;margin-left:6px;}
+  .hi-unrl.none{color:var(--ink-soft);font-weight:600;font-size:13px;}
+  .hi-meta{font-size:12px;color:var(--ink-soft);margin-top:4px;font-variant-numeric:tabular-nums;}
+  .hi-price{display:flex;align-items:center;gap:8px;margin-top:8px;}
+  .hi-price span{font-size:13px;color:var(--ink-soft);}
+  .hi-price input{width:130px;padding:8px 10px;font-size:16px;border:2px solid var(--line);border-radius:9px;background:#fff;font-family:inherit;}
+  .hi-price input:focus{outline:none;border-color:var(--brass);}
+  .closed-head{margin-top:16px;font-size:12px;color:var(--ink-soft);font-weight:700;letter-spacing:1px;}
+  .closed-row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px dashed var(--line);font-size:14px;}
+  .closed-row:last-child{border-bottom:none;}
   .empty{text-align:center;color:var(--ink-soft);padding:30px 10px;font-size:14px;}
 
   /* ===== 底部分頁列 ===== */
@@ -292,8 +312,25 @@
     <!-- 庫存 -->
     <section class="tab" id="tab-holdings">
       <div class="card">
-        <h2>目前庫存（尚未賣出的股票）</h2>
+        <h2>投資總覽</h2>
+        <div id="holdSummary"><div class="empty">目前沒有庫存</div></div>
+      </div>
+      <div class="card">
+        <h2>各檔持股</h2>
         <div id="holdList"><div class="empty">目前沒有庫存</div></div>
+      </div>
+      <div class="card">
+        <h2>更新現價</h2>
+        <p class="hint">
+          填入或貼上目前市價，系統會即時算出每檔的未實現損益、報酬率，以及全部股票的總市值（並和上一次更新比較）。<br>
+          可以整份把持股表貼上（會自動抓「代號」和「現價」欄），或每行只貼 <b>代號,現價</b>：<br>
+          <span class="mono">2330,2465</span><br>
+          <span class="mono">0050,108.8</span>
+        </p>
+        <textarea id="priceInput" rows="5" style="width:100%;padding:12px;font-size:14px;border:2px solid var(--line);border-radius:11px;font-family:ui-monospace,monospace;" placeholder="2330,2465"></textarea>
+        <div style="margin-top:12px;">
+          <button class="btn btn-primary" onclick="batchUpdatePrices()">更新現價</button>
+        </div>
       </div>
     </section>
 
@@ -315,6 +352,23 @@
         <textarea id="bulkInput" rows="6" style="width:100%;padding:12px;font-size:14px;border:2px solid var(--line);border-radius:11px;font-family:ui-monospace,monospace;" placeholder="2026-03-10,2330,台積電,買,1000,580,83,0"></textarea>
         <div style="margin-top:12px;">
           <button class="btn btn-primary" onclick="bulkImport()">匯入這些交易</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>匯入持股現況（開帳）</h2>
+        <p class="hint">
+          如果你手上已經有一份「目前持股表」，可以直接把整份貼上來當作開帳庫存，不用一筆一筆補買進紀錄。<br>
+          系統只會讀取 <b>股數</b> 和 <b>成本（平均成本）</b> 這兩欄，其餘（現價／市值／損益／報酬率）是每天變動的行情，App 不會儲存。<br>
+          每行一檔，欄位順序如下（逗號或 Tab 分隔都可以）：<br>
+          <b>日期,代號,名稱,股數,現價,成本,成本總額,市值,損益,報酬率</b><br>
+          例如：<br>
+          <span class="mono">2026-07-03,0050,元大台灣50,12000,108.8,74.03,888360,1305600,417240,46.97%</span><br>
+          ・可以直接把持股表整段貼上　・標題列會自動略過　・匯入後會在「庫存」看到這些股票
+        </p>
+        <textarea id="holdingsInput" rows="6" style="width:100%;padding:12px;font-size:14px;border:2px solid var(--line);border-radius:11px;font-family:ui-monospace,monospace;" placeholder="2026-07-03,0050,元大台灣50,12000,108.8,74.03,888360,1305600,417240,46.97%"></textarea>
+        <div style="margin-top:12px;">
+          <button class="btn btn-primary" onclick="importHoldings()">匯入持股現況</button>
         </div>
       </div>
 
@@ -350,6 +404,8 @@
 
 <script>
 const STORAGE_KEY = 'stock_ledger_transactions_v1';
+const PRICE_KEY = 'stock_ledger_prices_v1';          // 現價表：代號 -> 每股現價
+const VALHIST_KEY = 'stock_ledger_value_history_v1'; // 總市值快照：日期 -> 當日總市值
 let currentType = 'buy';
 let openDay = null;
 
@@ -362,11 +418,38 @@ function fmt(n){
   const v = Math.round((n + Number.EPSILON)*100)/100;
   return v.toLocaleString('zh-Hant-TW',{maximumFractionDigits:2});
 }
+function pct(n){ return (n>=0?'+':'') + n.toFixed(1) + '%'; }
 function loadTx(){
   try{ return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
   catch(e){ return []; }
 }
 function saveTx(list){ localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); }
+function loadPrices(){
+  try{ return JSON.parse(localStorage.getItem(PRICE_KEY)) || {}; }
+  catch(e){ return {}; }
+}
+function savePrices(map){ localStorage.setItem(PRICE_KEY, JSON.stringify(map)); }
+function loadValueHistory(){
+  try{ return JSON.parse(localStorage.getItem(VALHIST_KEY)) || {}; }
+  catch(e){ return {}; }
+}
+function saveValueHistory(map){ localStorage.setItem(VALHIST_KEY, JSON.stringify(map)); }
+
+/* 依「目前庫存 × 現價」算出總市值，並把今天的總市值存成快照，供日對日比較。
+   只計入有填現價的股票；若一檔都沒有現價則不記錄。 */
+function recordValueSnapshot(){
+  const {holdings} = computeAll();
+  const prices = loadPrices();
+  let total = 0, any = false;
+  Object.keys(holdings).forEach(code=>{
+    const h = holdings[code];
+    if(h.qty > 0.0001 && prices[code] != null){ total += h.qty * prices[code]; any = true; }
+  });
+  if(!any) return;
+  const hist = loadValueHistory();
+  hist[todayStr()] = total;
+  saveValueHistory(hist);
+}
 
 function showToast(msg){
   const t = document.getElementById('toast');
@@ -495,6 +578,113 @@ function bulkImport(){
     showToast(`已成功匯入 ${ok} 筆交易`);
   }
   goTab('home');
+}
+
+/* ===== 匯入持股現況（開帳）=====
+   讀入一份「目前持股表」，每檔以開帳買進的方式建立庫存。
+   取用 股數(index 3) 與 成本(index 5) 建立庫存；現價(index 4) 若有則一併存進現價表。
+   其餘欄位（市值/損益/報酬率）不儲存。欄位分隔容許逗號或 Tab 混用，並略過標題/非資料列。 */
+function importHoldings(){
+  const raw = document.getElementById('holdingsInput').value;
+  const lines = raw.split('\n').map(l=>l.trim()).filter(l=>l.length>0);
+  if(lines.length===0){ showToast('請先貼上持股表'); return; }
+
+  const list = loadTx();
+  const prices = loadPrices();
+  let base = Date.now();
+  let ok = 0, fail = [], skipped = 0;
+
+  lines.forEach((line, idx)=>{
+    // 逗號或 Tab（含連續分隔與多餘空白）都視為欄位分隔
+    const cols = line.split(/[,\t]+/).map(c=>c.trim()).filter(c=>c.length>0);
+    const date = cols[0] || '';
+    // 非日期開頭者視為標題列，直接略過（不算錯誤）
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){ skipped++; return; }
+    if(cols.length < 6){ fail.push(idx+1); return; }
+
+    const code = cols[1];
+    const name = cols[2] || '';
+    const qty = parseFloat(cols[3]);   // 股數
+    const priceNow = parseFloat(cols[4]); // 現價（選填）
+    const cost = parseFloat(cols[5]);  // 成本（平均成本）
+    if(!code){ fail.push(idx+1); return; }
+    if(!qty || qty<=0 || !cost || cost<=0){ fail.push(idx+1); return; }
+
+    list.push({
+      id: (base+idx)+'-'+Math.random().toString(36).slice(2,7),
+      createdAt: base + idx, // 保留貼上時的先後順序
+      date, code, name, type:'buy', qty, price:cost, fee:0, tax:0
+    });
+    if(priceNow > 0) prices[code] = priceNow;
+    ok++;
+  });
+
+  saveTx(list);
+  savePrices(prices);
+  recordValueSnapshot();
+  populateCodeList();
+  document.getElementById('holdingsInput').value = '';
+
+  if(fail.length){
+    alert(`已匯入 ${ok} 檔持股。第 ${fail.join('、')} 行格式有問題，未匯入，請檢查後重貼那幾行。`);
+  } else {
+    showToast(`已匯入 ${ok} 檔持股`);
+  }
+  goTab('holdings');
+}
+
+/* ===== 更新現價（手動）=====
+   接受兩種貼上格式：整份持股表（日期開頭 → 取 代號=index1、現價=index4），
+   或每行「代號,現價」。只更新現價表，不會新增任何交易。更新後記錄今日總市值快照。 */
+function batchUpdatePrices(){
+  const raw = document.getElementById('priceInput').value;
+  const lines = raw.split('\n').map(l=>l.trim()).filter(l=>l.length>0);
+  if(lines.length===0){ showToast('請先貼上現價'); return; }
+
+  const prices = loadPrices();
+  let ok = 0, fail = [];
+
+  lines.forEach((line, idx)=>{
+    const cols = line.split(/[,\t]+/).map(c=>c.trim()).filter(c=>c.length>0);
+    let code, priceRaw, isDataRow;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(cols[0]||'')){
+      // 整份持股表的一列
+      isDataRow = true;
+      code = cols[1]; priceRaw = cols[4];
+    } else {
+      // 代號,現價
+      code = cols[0]; priceRaw = cols[1];
+      isDataRow = cols.length >= 2 && /^\d/.test(code || '');
+    }
+    const p = parseFloat(priceRaw);
+    if(!code || !p || p<=0){
+      if(isDataRow) fail.push(idx+1); // 看起來是資料列卻讀不到價 → 報錯；標題列則略過
+      return;
+    }
+    prices[code] = p;
+    ok++;
+  });
+
+  savePrices(prices);
+  recordValueSnapshot();
+  document.getElementById('priceInput').value = '';
+
+  if(fail.length){
+    alert(`已更新 ${ok} 檔現價。第 ${fail.join('、')} 行格式有問題，請檢查後重貼那幾行。`);
+  } else {
+    showToast(`已更新 ${ok} 檔現價`);
+  }
+  renderHoldings();
+}
+
+/* 單檔快速改現價（庫存頁每列的輸入框） */
+function setPrice(code, val){
+  const p = parseFloat(val);
+  const prices = loadPrices();
+  if(!p || p<=0){ delete prices[code]; } else { prices[code] = p; }
+  savePrices(prices);
+  recordValueSnapshot();
+  renderHoldings();
 }
 
 /* ===== 代號自動帶出 ===== */
@@ -672,26 +862,121 @@ function toggleDay(d){
 
 /* ===== 庫存 ===== */
 function renderHoldings(){
-  const {holdings} = computeAll();
-  const rows = Object.keys(holdings)
+  const {holdings, annotated} = computeAll();
+  const prices = loadPrices();
+
+  // 每檔累計已實現損益（含賣出與股息）
+  const realizedByCode = {};
+  annotated.forEach(t=>{
+    if(t.realized !== null){ realizedByCode[t.code] = (realizedByCode[t.code]||0) + t.realized; }
+  });
+
+  const held = Object.keys(holdings)
     .map(code=>({code, ...holdings[code]}))
     .filter(h=>h.qty > 0.0001)
     .sort((a,b)=> a.code.localeCompare(b.code, 'zh-Hant'));
+
+  // 已清倉（已無庫存但曾有已實現損益）
+  const heldCodes = new Set(held.map(h=>h.code));
+  const closed = Object.keys(realizedByCode)
+    .filter(code=>!heldCodes.has(code))
+    .map(code=>({code, name: holdings[code] ? holdings[code].name : code, realized: realizedByCode[code]}))
+    .sort((a,b)=> a.code.localeCompare(b.code, 'zh-Hant'));
+
+  // 總計（市值/未實現僅計入有現價的股票）
+  let totalMarket = 0, totalCostPriced = 0, pricedCount = 0;
+  held.forEach(h=>{
+    const p = prices[h.code];
+    if(p != null){ totalMarket += h.qty * p; totalCostPriced += h.cost; pricedCount++; }
+  });
+  const totalUnrl = totalMarket - totalCostPriced;
+  const totalRealized = Object.values(realizedByCode).reduce((a,b)=>a+b, 0);
+
+  // 與前一次紀錄的總市值比較
+  const hist = loadValueHistory();
+  const today = todayStr();
+  const prevDates = Object.keys(hist).filter(d=>d < today).sort();
+  const prevDate = prevDates.length ? prevDates[prevDates.length-1] : null;
+  const prevTotal = prevDate != null ? hist[prevDate] : null;
+
+  const sgn = v => (v>=0?'pos':'neg');
+  const signed = v => (v>=0?'+':'') + fmt(v);
+
+  /* ---- 投資總覽 ---- */
+  const sum = document.getElementById('holdSummary');
+  if(held.length === 0){
+    sum.innerHTML = '<div class="empty">目前沒有庫存</div>';
+  } else if(pricedCount === 0){
+    sum.innerHTML = `
+      <div class="sum-line"><span class="k">已實現損益（全部）</span><span class="v ${sgn(totalRealized)}">${signed(totalRealized)}</span></div>
+      <div class="sum-note">尚未填入任何現價，請到下方「更新現價」貼上目前市價，即可看到總市值與未實現損益。</div>`;
+  } else {
+    let cmp;
+    if(prevTotal != null){
+      const diff = totalMarket - prevTotal;
+      const diffPct = prevTotal > 0 ? diff/prevTotal*100 : 0;
+      cmp = `<div class="sum-line"><span class="k">較 ${prevDate.slice(5).replace('-','/')}</span><span class="v ${sgn(diff)}">${signed(diff)}<span class="pct">${pct(diffPct)}</span></span></div>`;
+    } else {
+      cmp = `<div class="sum-line"><span class="k">較前一次</span><span class="v" style="font-size:13px;color:var(--ink-soft);font-weight:600;">尚無前一次紀錄</span></div>`;
+    }
+    const unrlPct = totalCostPriced > 0 ? totalUnrl/totalCostPriced*100 : 0;
+    sum.innerHTML = `
+      <div class="sum-line"><span class="k">今日總市值</span><span class="v big mono">${fmt(totalMarket)}</span></div>
+      ${cmp}
+      <div class="sum-line"><span class="k">未實現損益</span><span class="v ${sgn(totalUnrl)}">${signed(totalUnrl)}<span class="pct">${pct(unrlPct)}</span></span></div>
+      <div class="sum-line"><span class="k">已實現損益（全部）</span><span class="v ${sgn(totalRealized)}">${signed(totalRealized)}</span></div>
+      <div class="sum-note">總市值與未實現損益僅計入已填現價的 ${pricedCount} / ${held.length} 檔。已實現損益為過去賣出與股息的累計。</div>`;
+  }
+
+  /* ---- 各檔持股 ---- */
   const box = document.getElementById('holdList');
-  if(rows.length===0){
+  if(held.length === 0){
     box.innerHTML = '<div class="empty">目前沒有庫存</div>';
     return;
   }
-  box.innerHTML = rows.map(h=>`
-    <div class="hold-row">
-      <div><span class="code">${h.code}</span>${h.name && h.name!==h.code ? ' '+h.name:''}</div>
-      <div class="r mono">${fmt(h.qty)} 股<br>均價 ${fmt(h.qty>0?h.cost/h.qty:0)}</div>
-    </div>`).join('');
+  let html = held.map(h=>{
+    const avg = h.qty>0 ? h.cost/h.qty : 0;
+    const p = prices[h.code];
+    const nameStr = h.name && h.name!==h.code ? ' '+h.name : '';
+    let unrlHtml, marketStr;
+    if(p != null){
+      const market = h.qty * p;
+      const unrl = market - h.cost;
+      const rPct = h.cost>0 ? unrl/h.cost*100 : 0;
+      unrlHtml = `<div class="hi-unrl ${sgn(unrl)}">${signed(unrl)}<span class="pct">${pct(rPct)}</span></div>`;
+      marketStr = `｜市值 ${fmt(market)}`;
+    } else {
+      unrlHtml = `<div class="hi-unrl none">未填現價</div>`;
+      marketStr = '';
+    }
+    const realized = realizedByCode[h.code];
+    const realizedStr = realized ? `｜已實現 <span class="${sgn(realized)}">${signed(realized)}</span>` : '';
+    return `
+    <div class="hold-item">
+      <div class="hi-top">
+        <div class="hi-name"><span class="code">${h.code}</span>${nameStr}</div>
+        ${unrlHtml}
+      </div>
+      <div class="hi-meta">股數 ${fmt(h.qty)}｜均價 ${fmt(avg)}${marketStr}${realizedStr}</div>
+      <div class="hi-price"><span>現價</span><input type="number" inputmode="decimal" value="${p != null ? p : ''}" placeholder="點此填現價" onchange="setPrice('${h.code}', this.value)"></div>
+    </div>`;
+  }).join('');
+
+  if(closed.length){
+    html += `<div class="closed-head">已清倉（僅剩已實現損益）</div>`;
+    html += closed.map(c=>`
+      <div class="closed-row">
+        <div><span class="code" style="font-weight:700;">${c.code}</span>${c.name && c.name!==c.code ? ' '+c.name : ''}</div>
+        <div class="mono ${sgn(c.realized)}">${signed(c.realized)}</div>
+      </div>`).join('');
+  }
+  box.innerHTML = html;
 }
 
 /* ===== 備份 / 還原 / 清除 ===== */
 function exportData(){
-  const data = loadTx();
+  // 新版備份包含交易、現價表、總市值紀錄；舊版是純交易陣列，仍可還原（見 importData）
+  const data = { version:2, transactions:loadTx(), prices:loadPrices(), valueHistory:loadValueHistory() };
   const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -708,9 +993,19 @@ function importData(evt){
   reader.onload = e=>{
     try{
       const data = JSON.parse(e.target.result);
-      if(!Array.isArray(data)) throw new Error('格式錯誤');
+      const isOld = Array.isArray(data);                 // 舊版：純交易陣列
+      const isNew = data && Array.isArray(data.transactions); // 新版：物件
+      if(!isOld && !isNew) throw new Error('格式錯誤');
       if(!confirm('還原備份會覆蓋目前所有資料，確定要繼續嗎？')) return;
-      saveTx(data);
+      if(isOld){
+        saveTx(data);
+        savePrices({});
+        saveValueHistory({});
+      } else {
+        saveTx(data.transactions);
+        savePrices(data.prices || {});
+        saveValueHistory(data.valueHistory || {});
+      }
       showToast('已還原備份');
       goTab('home');
     }catch(err){
@@ -724,6 +1019,8 @@ function clearAll(){
   if(!confirm('確定要清除全部交易紀錄嗎？此動作無法復原！')) return;
   if(!confirm('再次確認：真的要清除全部資料嗎？')) return;
   saveTx([]);
+  savePrices({});
+  saveValueHistory({});
   showToast('已清除全部資料');
   goTab('home');
 }
