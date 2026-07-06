@@ -320,16 +320,16 @@
         <div id="holdList"><div class="empty">目前沒有庫存</div></div>
       </div>
       <div class="card">
-        <h2>更新現價</h2>
+        <h2>更新收盤價</h2>
         <p class="hint">
-          填入或貼上目前市價，系統會即時算出每檔的未實現損益、報酬率，以及全部股票的總市值（並和上一次更新比較）。<br>
-          可以整份把持股表貼上（會自動抓「代號」和「現價」欄），或每行只貼 <b>代號,現價</b>：<br>
+          填入每檔的當日收盤價（可到 Yahoo 奇摩股市查），系統會即時算出每檔的未實現損益、報酬率，以及全部股票的總市值（並和上一次更新比較）。<br>
+          可以整份把持股表貼上（會自動抓「代號」和「收盤價」欄），或每行只貼 <b>代號,收盤價</b>：<br>
           <span class="mono">2330,2465</span><br>
           <span class="mono">0050,108.8</span>
         </p>
         <textarea id="priceInput" rows="5" style="width:100%;padding:12px;font-size:14px;border:2px solid var(--line);border-radius:11px;font-family:ui-monospace,monospace;" placeholder="2330,2465"></textarea>
         <div style="margin-top:12px;">
-          <button class="btn btn-primary" onclick="batchUpdatePrices()">更新現價</button>
+          <button class="btn btn-primary" onclick="batchUpdatePrices()">更新收盤價</button>
         </div>
       </div>
     </section>
@@ -359,9 +359,9 @@
         <h2>匯入持股現況（開帳）</h2>
         <p class="hint">
           如果你手上已經有一份「目前持股表」，可以直接把整份貼上來當作開帳庫存，不用一筆一筆補買進紀錄。<br>
-          系統只會讀取 <b>股數</b> 和 <b>成本（平均成本）</b> 這兩欄，其餘（現價／市值／損益／報酬率）是每天變動的行情，App 不會儲存。<br>
+          系統會讀取 <b>股數</b>、<b>成本（平均成本）</b> 和 <b>收盤價</b>（作為現在的市價）三欄，其餘（市值／損益／報酬率）會自動算，不用管。<br>
           每行一檔，欄位順序如下（逗號或 Tab 分隔都可以）：<br>
-          <b>日期,代號,名稱,股數,現價,成本,成本總額,市值,損益,報酬率</b><br>
+          <b>日期,代號,名稱,股數,收盤價,成本,成本總額,市值,損益,報酬率</b><br>
           例如：<br>
           <span class="mono">2026-07-03,0050,元大台灣50,12000,108.8,74.03,888360,1305600,417240,46.97%</span><br>
           ・可以直接把持股表整段貼上　・標題列會自動略過　・匯入後會在「庫存」看到這些股票
@@ -478,7 +478,7 @@ function setType(t){
   document.getElementById('feeTaxWrap').style.display = t==='dividend' ? 'none' : 'flex';
   document.getElementById('dividendWrap').style.display = t==='dividend' ? 'block' : 'none';
   document.getElementById('addHint').textContent = t==='dividend'
-    ? '股息不會影響庫存股數與成本，只會計入當天與當月的損益統計。'
+    ? '股息會用來沖抵這檔股票的持有成本（降低平均成本），不列入當天已實現損益。'
     : '損益會自動用「平均成本法」計算：賣出時系統會自動比對這檔股票之前買進的平均成本，不用自己算。';
 }
 
@@ -511,8 +511,11 @@ function computeAll(){
       h.cost = Math.max(0, h.cost - costOfSold);
       dailyPL[tx.date] = (dailyPL[tx.date]||0) + realized;
     } else if(tx.type === 'dividend'){
-      realized = tx.amount || 0;
-      dailyPL[tx.date] = (dailyPL[tx.date]||0) + realized;
+      // 股息沖抵成本：降低該檔持有成本（不列為已實現損益、不影響股數）
+      const amt = tx.amount || 0;
+      if(h.qty <= 0 || amt > h.cost) warning = true; // 沒有庫存可沖抵，或金額超過剩餘成本
+      h.cost = Math.max(0, h.cost - amt);
+      // realized 維持 null，dailyPL 不加入股息
     }
     holdings[tx.code] = h;
     annotated.push(Object.assign({}, tx, {realized, warning}));
@@ -639,7 +642,7 @@ function importHoldings(){
 function batchUpdatePrices(){
   const raw = document.getElementById('priceInput').value;
   const lines = raw.split('\n').map(l=>l.trim()).filter(l=>l.length>0);
-  if(lines.length===0){ showToast('請先貼上現價'); return; }
+  if(lines.length===0){ showToast('請先貼上收盤價'); return; }
 
   const prices = loadPrices();
   let ok = 0, fail = [];
@@ -670,9 +673,9 @@ function batchUpdatePrices(){
   document.getElementById('priceInput').value = '';
 
   if(fail.length){
-    alert(`已更新 ${ok} 檔現價。第 ${fail.join('、')} 行格式有問題，請檢查後重貼那幾行。`);
+    alert(`已更新 ${ok} 檔收盤價。第 ${fail.join('、')} 行格式有問題，請檢查後重貼那幾行。`);
   } else {
-    showToast(`已更新 ${ok} 檔現價`);
+    showToast(`已更新 ${ok} 檔收盤價`);
   }
   renderHoldings();
 }
@@ -790,7 +793,7 @@ function renderHome(){
       <div class="tx-row">
         <span class="tag dividend">股息</span>
         <b>${t.code}${t.name? ' '+t.name:''}</b>
-        <span class="mono" style="float:right;color:var(--seal);">+${fmt(t.realized)}</span>
+        <span class="mono" style="float:right;color:var(--ink-soft);">股息 ${fmt(t.amount)}（沖抵成本）</span>
       </div>`;
       }
       return `
@@ -834,7 +837,8 @@ function renderHistory(){
               <div>
                 <span class="tag dividend">股息</span>
                 <b>${t.code}${t.name?' '+t.name:''}</b>
-                <div class="meta" style="color:var(--seal);font-weight:700;">股息收入：+${fmt(t.realized)}</div>
+                <div class="meta">股息 ${fmt(t.amount)}（沖抵成本，降低平均成本）</div>
+                ${t.warning ? `<div class="meta" style="color:var(--seal);">⚠ 這檔當時沒有庫存可沖抵、或金額超過成本，僅供參考</div>` : ''}
               </div>
               <button class="del" onclick="deleteTx('${t.id}')">刪除</button>
             </div>`;
@@ -865,7 +869,7 @@ function renderHoldings(){
   const {holdings, annotated} = computeAll();
   const prices = loadPrices();
 
-  // 每檔累計已實現損益（含賣出與股息）
+  // 每檔累計已實現損益（賣出；股息改為沖抵成本，不列入這裡）
   const realizedByCode = {};
   annotated.forEach(t=>{
     if(t.realized !== null){ realizedByCode[t.code] = (realizedByCode[t.code]||0) + t.realized; }
@@ -909,7 +913,7 @@ function renderHoldings(){
   } else if(pricedCount === 0){
     sum.innerHTML = `
       <div class="sum-line"><span class="k">已實現損益（全部）</span><span class="v ${sgn(totalRealized)}">${signed(totalRealized)}</span></div>
-      <div class="sum-note">尚未填入任何現價，請到下方「更新現價」貼上目前市價，即可看到總市值與未實現損益。</div>`;
+      <div class="sum-note">尚未填入任何收盤價，請到下方「更新收盤價」填入當日收盤價，即可看到總市值與未實現損益。</div>`;
   } else {
     let cmp;
     if(prevTotal != null){
@@ -925,7 +929,7 @@ function renderHoldings(){
       ${cmp}
       <div class="sum-line"><span class="k">未實現損益</span><span class="v ${sgn(totalUnrl)}">${signed(totalUnrl)}<span class="pct">${pct(unrlPct)}</span></span></div>
       <div class="sum-line"><span class="k">已實現損益（全部）</span><span class="v ${sgn(totalRealized)}">${signed(totalRealized)}</span></div>
-      <div class="sum-note">總市值與未實現損益僅計入已填現價的 ${pricedCount} / ${held.length} 檔。已實現損益為過去賣出與股息的累計。</div>`;
+      <div class="sum-note">總市值與未實現損益僅計入已填收盤價的 ${pricedCount} / ${held.length} 檔。已實現損益為過去賣出的累計；股息已沖抵成本、反映在未實現損益。</div>`;
   }
 
   /* ---- 各檔持股 ---- */
@@ -946,7 +950,7 @@ function renderHoldings(){
       unrlHtml = `<div class="hi-unrl ${sgn(unrl)}">${signed(unrl)}<span class="pct">${pct(rPct)}</span></div>`;
       marketStr = `｜市值 ${fmt(market)}`;
     } else {
-      unrlHtml = `<div class="hi-unrl none">未填現價</div>`;
+      unrlHtml = `<div class="hi-unrl none">未填收盤價</div>`;
       marketStr = '';
     }
     const realized = realizedByCode[h.code];
@@ -958,7 +962,7 @@ function renderHoldings(){
         ${unrlHtml}
       </div>
       <div class="hi-meta">股數 ${fmt(h.qty)}｜均價 ${fmt(avg)}${marketStr}${realizedStr}</div>
-      <div class="hi-price"><span>現價</span><input type="number" inputmode="decimal" value="${p != null ? p : ''}" placeholder="點此填現價" onchange="setPrice('${h.code}', this.value)"></div>
+      <div class="hi-price"><span>收盤價</span><input type="number" inputmode="decimal" value="${p != null ? p : ''}" placeholder="點此填收盤價" onchange="setPrice('${h.code}', this.value)"></div>
     </div>`;
   }).join('');
 
