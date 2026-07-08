@@ -165,6 +165,8 @@
   .hi-unrl .pct{font-size:12px;font-weight:600;margin-left:6px;}
   .hi-unrl.none{color:var(--ink-soft);font-weight:600;font-size:13px;}
   .hi-meta{font-size:12px;color:var(--ink-soft);margin-top:4px;font-variant-numeric:tabular-nums;}
+  .hi-day{font-size:12.5px;color:var(--ink-soft);margin-top:3px;font-variant-numeric:tabular-nums;}
+  .hi-day span{font-weight:700;}
   .hi-price{display:flex;align-items:center;gap:8px;margin-top:8px;}
   .hi-price span{font-size:13px;color:var(--ink-soft);}
   .hi-price input{width:130px;padding:8px 10px;font-size:16px;border:2px solid var(--line);border-radius:9px;background:#fff;font-family:inherit;}
@@ -404,8 +406,9 @@
 
 <script>
 const STORAGE_KEY = 'stock_ledger_transactions_v1';
-const PRICE_KEY = 'stock_ledger_prices_v1';          // 現價表：代號 -> 每股現價
+const PRICE_KEY = 'stock_ledger_prices_v1';          // 收盤價表：代號 -> 每股收盤價
 const VALHIST_KEY = 'stock_ledger_value_history_v1'; // 總市值快照：日期 -> 當日總市值
+const PRICEHIST_KEY = 'stock_ledger_price_history_v1'; // 每檔收盤價歷史：代號 -> {日期: 收盤價}，用來算漲跌
 let currentType = 'buy';
 let openDay = null;
 
@@ -434,6 +437,28 @@ function loadValueHistory(){
   catch(e){ return {}; }
 }
 function saveValueHistory(map){ localStorage.setItem(VALHIST_KEY, JSON.stringify(map)); }
+function loadPriceHistory(){
+  try{ return JSON.parse(localStorage.getItem(PRICEHIST_KEY)) || {}; }
+  catch(e){ return {}; }
+}
+function savePriceHistory(map){ localStorage.setItem(PRICEHIST_KEY, JSON.stringify(map)); }
+
+/* 把某檔的收盤價記進今天的歷史（供計算漲跌）。傳入已載入的 hist 物件時就地更新、由呼叫端統一存檔。 */
+function stampPrice(code, price, hist){
+  const h = hist || loadPriceHistory();
+  if(!h[code]) h[code] = {};
+  h[code][todayStr()] = price;
+  if(!hist) savePriceHistory(h);
+  return h;
+}
+/* 取某檔「前一日（今天以前最近一次）」的收盤價；沒有就回傳 null。 */
+function prevClose(code){
+  const h = loadPriceHistory()[code];
+  if(!h) return null;
+  const today = todayStr();
+  const days = Object.keys(h).filter(d=>d < today).sort();
+  return days.length ? h[days[days.length-1]] : null;
+}
 
 /* 依「目前庫存 × 現價」算出總市值，並把今天的總市值存成快照，供日對日比較。
    只計入有填現價的股票；若一檔都沒有現價則不記錄。 */
@@ -594,6 +619,7 @@ function importHoldings(){
 
   const list = loadTx();
   const prices = loadPrices();
+  const pHist = loadPriceHistory();
   let base = Date.now();
   let ok = 0, fail = [], skipped = 0;
 
@@ -618,12 +644,13 @@ function importHoldings(){
       createdAt: base + idx, // 保留貼上時的先後順序
       date, code, name, type:'buy', qty, price:cost, fee:0, tax:0
     });
-    if(priceNow > 0) prices[code] = priceNow;
+    if(priceNow > 0){ prices[code] = priceNow; stampPrice(code, priceNow, pHist); }
     ok++;
   });
 
   saveTx(list);
   savePrices(prices);
+  savePriceHistory(pHist);
   recordValueSnapshot();
   populateCodeList();
   document.getElementById('holdingsInput').value = '';
@@ -645,6 +672,7 @@ function batchUpdatePrices(){
   if(lines.length===0){ showToast('請先貼上收盤價'); return; }
 
   const prices = loadPrices();
+  const pHist = loadPriceHistory();
   let ok = 0, fail = [];
 
   lines.forEach((line, idx)=>{
@@ -655,7 +683,7 @@ function batchUpdatePrices(){
       isDataRow = true;
       code = cols[1]; priceRaw = cols[4];
     } else {
-      // 代號,現價
+      // 代號,收盤價
       code = cols[0]; priceRaw = cols[1];
       isDataRow = cols.length >= 2 && /^\d/.test(code || '');
     }
@@ -665,10 +693,12 @@ function batchUpdatePrices(){
       return;
     }
     prices[code] = p;
+    stampPrice(code, p, pHist);
     ok++;
   });
 
   savePrices(prices);
+  savePriceHistory(pHist);
   recordValueSnapshot();
   document.getElementById('priceInput').value = '';
 
@@ -680,12 +710,20 @@ function batchUpdatePrices(){
   renderHoldings();
 }
 
-/* 單檔快速改現價（庫存頁每列的輸入框） */
+/* 單檔快速改收盤價（庫存頁每列的輸入框） */
 function setPrice(code, val){
   const p = parseFloat(val);
   const prices = loadPrices();
-  if(!p || p<=0){ delete prices[code]; } else { prices[code] = p; }
+  const pHist = loadPriceHistory();
+  if(!p || p<=0){
+    delete prices[code];
+    if(pHist[code]) delete pHist[code][todayStr()]; // 清空時一併移除今天的歷史
+  } else {
+    prices[code] = p;
+    stampPrice(code, p, pHist);
+  }
   savePrices(prices);
+  savePriceHistory(pHist);
   recordValueSnapshot();
   renderHoldings();
 }
@@ -868,6 +906,7 @@ function toggleDay(d){
 function renderHoldings(){
   const {holdings, annotated} = computeAll();
   const prices = loadPrices();
+  const pHist = loadPriceHistory();
 
   // 每檔累計已實現損益（賣出；股息改為沖抵成本，不列入這裡）
   const realizedByCode = {};
@@ -905,6 +944,12 @@ function renderHoldings(){
 
   const sgn = v => (v>=0?'pos':'neg');
   const signed = v => (v>=0?'+':'') + fmt(v);
+  // 某檔今天以前最近一次的收盤價（算漲跌用）
+  const getPrev = code => {
+    const hh = pHist[code]; if(!hh) return null;
+    const days = Object.keys(hh).filter(d=>d < today).sort();
+    return days.length ? hh[days[days.length-1]] : null;
+  };
 
   /* ---- 投資總覽 ---- */
   const sum = document.getElementById('holdSummary');
@@ -912,24 +957,24 @@ function renderHoldings(){
     sum.innerHTML = '<div class="empty">目前沒有庫存</div>';
   } else if(pricedCount === 0){
     sum.innerHTML = `
-      <div class="sum-line"><span class="k">已實現損益（全部）</span><span class="v ${sgn(totalRealized)}">${signed(totalRealized)}</span></div>
+      <div class="sum-line"><span class="k">買賣利差（已實現損益）</span><span class="v ${sgn(totalRealized)}">${signed(totalRealized)}</span></div>
       <div class="sum-note">尚未填入任何收盤價，請到下方「更新收盤價」填入當日收盤價，即可看到總市值與未實現損益。</div>`;
   } else {
     let cmp;
     if(prevTotal != null){
       const diff = totalMarket - prevTotal;
       const diffPct = prevTotal > 0 ? diff/prevTotal*100 : 0;
-      cmp = `<div class="sum-line"><span class="k">較 ${prevDate.slice(5).replace('-','/')}</span><span class="v ${sgn(diff)}">${signed(diff)}<span class="pct">${pct(diffPct)}</span></span></div>`;
+      cmp = `<div class="sum-line"><span class="k">今日利差（較 ${prevDate.slice(5).replace('-','/')}）</span><span class="v ${sgn(diff)}">${signed(diff)}<span class="pct">${pct(diffPct)}</span></span></div>`;
     } else {
-      cmp = `<div class="sum-line"><span class="k">較前一次</span><span class="v" style="font-size:13px;color:var(--ink-soft);font-weight:600;">尚無前一次紀錄</span></div>`;
+      cmp = `<div class="sum-line"><span class="k">今日利差</span><span class="v" style="font-size:13px;color:var(--ink-soft);font-weight:600;">尚無前一日可比較</span></div>`;
     }
     const unrlPct = totalCostPriced > 0 ? totalUnrl/totalCostPriced*100 : 0;
     sum.innerHTML = `
       <div class="sum-line"><span class="k">今日總市值</span><span class="v big mono">${fmt(totalMarket)}</span></div>
       ${cmp}
       <div class="sum-line"><span class="k">未實現損益</span><span class="v ${sgn(totalUnrl)}">${signed(totalUnrl)}<span class="pct">${pct(unrlPct)}</span></span></div>
-      <div class="sum-line"><span class="k">已實現損益（全部）</span><span class="v ${sgn(totalRealized)}">${signed(totalRealized)}</span></div>
-      <div class="sum-note">總市值與未實現損益僅計入已填收盤價的 ${pricedCount} / ${held.length} 檔。已實現損益為過去賣出的累計；股息已沖抵成本、反映在未實現損益。</div>`;
+      <div class="sum-line"><span class="k">買賣利差（已實現損益）</span><span class="v ${sgn(totalRealized)}">${signed(totalRealized)}</span></div>
+      <div class="sum-note">總市值與未實現損益僅計入已填收盤價的 ${pricedCount} / ${held.length} 檔。「今日利差」是總市值較前一日的增減；「買賣利差」是過去賣出的已實現損益；股息已沖抵成本、反映在未實現損益。</div>`;
   }
 
   /* ---- 各檔持股 ---- */
@@ -954,7 +999,17 @@ function renderHoldings(){
       marketStr = '';
     }
     const realized = realizedByCode[h.code];
-    const realizedStr = realized ? `｜已實現 <span class="${sgn(realized)}">${signed(realized)}</span>` : '';
+    const realizedStr = realized ? `｜買賣利差 <span class="${sgn(realized)}">${signed(realized)}</span>` : '';
+    // 今日漲跌與今日利差（今收 − 昨收，需已有前一日收盤價）
+    let dayHtml = '';
+    if(p != null){
+      const prevC = getPrev(h.code);
+      if(prevC != null){
+        const chg = p - prevC;
+        const todayDiff = h.qty * chg;
+        dayHtml = `<div class="hi-day">今日 漲跌 <span class="${sgn(chg)}">${signed(chg)}</span>｜今日利差 <span class="${sgn(todayDiff)}">${signed(todayDiff)}</span></div>`;
+      }
+    }
     return `
     <div class="hold-item">
       <div class="hi-top">
@@ -962,12 +1017,13 @@ function renderHoldings(){
         ${unrlHtml}
       </div>
       <div class="hi-meta">股數 ${fmt(h.qty)}｜均價 ${fmt(avg)}${marketStr}${realizedStr}</div>
+      ${dayHtml}
       <div class="hi-price"><span>收盤價</span><input type="number" inputmode="decimal" value="${p != null ? p : ''}" placeholder="點此填收盤價" onchange="setPrice('${h.code}', this.value)"></div>
     </div>`;
   }).join('');
 
   if(closed.length){
-    html += `<div class="closed-head">已清倉（僅剩已實現損益）</div>`;
+    html += `<div class="closed-head">已清倉（買賣利差／已實現損益）</div>`;
     html += closed.map(c=>`
       <div class="closed-row">
         <div><span class="code" style="font-weight:700;">${c.code}</span>${c.name && c.name!==c.code ? ' '+c.name : ''}</div>
@@ -979,8 +1035,8 @@ function renderHoldings(){
 
 /* ===== 備份 / 還原 / 清除 ===== */
 function exportData(){
-  // 新版備份包含交易、現價表、總市值紀錄；舊版是純交易陣列，仍可還原（見 importData）
-  const data = { version:2, transactions:loadTx(), prices:loadPrices(), valueHistory:loadValueHistory() };
+  // 新版備份包含交易、收盤價表、總市值紀錄、收盤價歷史；舊版是純交易陣列，仍可還原（見 importData）
+  const data = { version:3, transactions:loadTx(), prices:loadPrices(), valueHistory:loadValueHistory(), priceHistory:loadPriceHistory() };
   const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -1005,10 +1061,12 @@ function importData(evt){
         saveTx(data);
         savePrices({});
         saveValueHistory({});
+        savePriceHistory({});
       } else {
         saveTx(data.transactions);
         savePrices(data.prices || {});
         saveValueHistory(data.valueHistory || {});
+        savePriceHistory(data.priceHistory || {});
       }
       showToast('已還原備份');
       goTab('home');
@@ -1025,6 +1083,7 @@ function clearAll(){
   saveTx([]);
   savePrices({});
   saveValueHistory({});
+  savePriceHistory({});
   showToast('已清除全部資料');
   goTab('home');
 }
