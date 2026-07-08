@@ -324,10 +324,10 @@
       <div class="card">
         <h2>更新收盤價</h2>
         <p class="hint">
-          按一下就自動抓所有持股的當日收盤價（資料來源：FinMind 台股資料），系統會即時算出未實現損益、報酬率、漲跌、今日利差與總市值。<br>
-          需要網路；若某幾檔抓不到，會列出來讓你在下面手動補。
+          每天第一次打開「庫存」頁會自動抓一次收盤價（資料來源：FinMind 台股資料）；也可以隨時按下面按鈕重抓最新價。<br>
+          需要網路；抓不到的會自動重試，仍失敗的才會列出來讓你在下面手動補。
         </p>
-        <button id="fetchBtn" class="btn btn-primary" onclick="fetchClosingPrices()">🔄 自動抓收盤價</button>
+        <button id="fetchBtn" class="btn btn-primary" onclick="fetchClosingPrices(false)">🔄 自動抓收盤價</button>
 
         <p class="hint" style="margin-top:20px;">
           <b>手動填（備援）</b>：抓不到或想自己改時使用。可整份把持股表貼上（自動抓「代號」和「收盤價」欄），或每行只貼 <b>代號,收盤價</b>：<br>
@@ -414,6 +414,7 @@ const STORAGE_KEY = 'stock_ledger_transactions_v1';
 const PRICE_KEY = 'stock_ledger_prices_v1';          // 收盤價表：代號 -> 每股收盤價
 const VALHIST_KEY = 'stock_ledger_value_history_v1'; // 總市值快照：日期 -> 當日總市值
 const PRICEHIST_KEY = 'stock_ledger_price_history_v1'; // 每檔收盤價歷史：代號 -> {日期: 收盤價}，用來算漲跌
+const AUTOFETCH_KEY = 'stock_ledger_last_autofetch';   // 記錄最後一次「打開庫存頁自動抓」的日期，一天只自動抓一次
 let currentType = 'buy';
 let openDay = null;
 
@@ -495,7 +496,7 @@ function goTab(name){
   if(name==='add'){ document.getElementById('f_date').value = todayStr(); setType('buy'); populateCodeList(); }
   if(name==='home') renderHome();
   if(name==='history') renderHistory();
-  if(name==='holdings') renderHoldings();
+  if(name==='holdings'){ renderHoldings(); maybeAutoFetch(); }
 }
 
 function setType(t){
@@ -741,10 +742,14 @@ function daysAgoStr(n){
   const p = x => String(x).padStart(2,'0');
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
 }
-async function fetchClosingPrices(){
+function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+/* auto=true：由「切換到庫存頁」自動觸發，失敗只用不打斷的小提示；
+   auto=false：使用者手動按按鈕，失敗會跳明顯視窗列出要手動補的代號。 */
+async function fetchClosingPrices(auto){
   const {holdings} = computeAll();
   const codes = Object.keys(holdings).filter(c=>holdings[c].qty > 0.0001);
-  if(codes.length === 0){ showToast('目前沒有庫存可抓'); return; }
+  if(codes.length === 0){ if(!auto) showToast('目前沒有庫存可抓'); return; }
 
   const btn = document.getElementById('fetchBtn');
   if(btn){ btn.disabled = true; btn.textContent = '抓取中…'; }
@@ -761,19 +766,28 @@ async function fetchClosingPrices(){
     }catch(e){ return { code, close: null }; }
   };
 
-  // 分批（每批 8 檔）避免一次太多被限流
-  const results = [];
-  for(let i=0; i<codes.length; i+=8){
-    const chunk = codes.slice(i, i+8);
-    results.push(...await Promise.all(chunk.map(getOne)));
+  // 分批（每批 8 檔）避免一次太多被限流；抓不到的自動重試（最多 3 輪、每輪間隔一下）
+  const closes = {};       // code -> close
+  let pending = codes.slice();
+  for(let attempt = 1; attempt <= 3 && pending.length; attempt++){
+    if(attempt > 1) await sleep(700); // 重試前稍等，避開瞬間限流
+    const results = [];
+    for(let i=0; i<pending.length; i+=8){
+      const chunk = pending.slice(i, i+8);
+      results.push(...await Promise.all(chunk.map(getOne)));
+    }
+    const stillFail = [];
+    results.forEach(({code, close})=>{
+      if(close != null) closes[code] = close; else stillFail.push(code);
+    });
+    pending = stillFail;
   }
 
   const prices = loadPrices();
   const pHist = loadPriceHistory();
-  let ok = 0; const failCodes = [];
-  results.forEach(({code, close})=>{
-    if(close != null){ prices[code] = close; stampPrice(code, close, pHist); ok++; }
-    else failCodes.push(code);
+  let ok = 0;
+  Object.keys(closes).forEach(code=>{
+    prices[code] = closes[code]; stampPrice(code, closes[code], pHist); ok++;
   });
   savePrices(prices);
   savePriceHistory(pHist);
@@ -782,11 +796,27 @@ async function fetchClosingPrices(){
   if(btn){ btn.disabled = false; btn.textContent = '🔄 自動抓收盤價'; }
   renderHoldings();
 
+  const failCodes = pending; // 三輪後仍抓不到的
   if(failCodes.length){
-    alert(`已自動更新 ${ok} 檔收盤價。\n這 ${failCodes.length} 檔抓不到，請在下方「手動填」補上：\n${failCodes.join('、')}`);
+    if(auto){
+      showToast(`已更新 ${ok} 檔，${failCodes.length} 檔抓不到可手動補`);
+    } else {
+      alert(`已自動更新 ${ok} 檔收盤價。\n這 ${failCodes.length} 檔抓不到（已重試），請在下方「手動填」補上：\n${failCodes.join('、')}`);
+    }
   } else {
     showToast(`已自動更新 ${ok} 檔收盤價`);
   }
+}
+
+/* 切到庫存頁時自動抓一次收盤價：一天只抓一次、離線或沒庫存則跳過。 */
+function maybeAutoFetch(){
+  if(navigator.onLine === false) return;
+  const {holdings} = computeAll();
+  const hasHeld = Object.keys(holdings).some(c=>holdings[c].qty > 0.0001);
+  if(!hasHeld) return;
+  if(localStorage.getItem(AUTOFETCH_KEY) === todayStr()) return; // 今天已自動抓過
+  localStorage.setItem(AUTOFETCH_KEY, todayStr());
+  fetchClosingPrices(true);
 }
 
 /* ===== 代號自動帶出 ===== */
@@ -1145,6 +1175,7 @@ function clearAll(){
   savePrices({});
   saveValueHistory({});
   savePriceHistory({});
+  localStorage.removeItem(AUTOFETCH_KEY);
   showToast('已清除全部資料');
   goTab('home');
 }
