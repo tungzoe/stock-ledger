@@ -1017,22 +1017,7 @@ function renderHoldings(){
     .map(code=>({code, name: holdings[code] ? holdings[code].name : code, realized: realizedByCode[code]}))
     .sort((a,b)=> a.code.localeCompare(b.code, 'zh-Hant'));
 
-  // 總計（市值/未實現僅計入有現價的股票）
-  let totalMarket = 0, totalCostPriced = 0, pricedCount = 0;
-  held.forEach(h=>{
-    const p = prices[h.code];
-    if(p != null){ totalMarket += h.qty * p; totalCostPriced += h.cost; pricedCount++; }
-  });
-  const totalUnrl = totalMarket - totalCostPriced;
-  const totalRealized = Object.values(realizedByCode).reduce((a,b)=>a+b, 0);
-
-  // 與前一次紀錄的總市值比較
-  const hist = loadValueHistory();
   const today = todayStr();
-  const prevDates = Object.keys(hist).filter(d=>d < today).sort();
-  const prevDate = prevDates.length ? prevDates[prevDates.length-1] : null;
-  const prevTotal = prevDate != null ? hist[prevDate] : null;
-
   const sgn = v => (v>=0?'pos':'neg');
   const signed = v => (v>=0?'+':'') + fmt(v);
   // 某檔今天以前最近一次的收盤價（算漲跌用）
@@ -1042,30 +1027,54 @@ function renderHoldings(){
     return days.length ? hh[days[days.length-1]] : null;
   };
 
+  // 今日買賣利差：只算「今天」賣出的已實現（依交易日期）
+  const todayRealizedByCode = {};
+  let todayRealizedTotal = 0;
+  annotated.forEach(t=>{
+    if(t.date === today && t.realized !== null){
+      todayRealizedByCode[t.code] = (todayRealizedByCode[t.code]||0) + t.realized;
+      todayRealizedTotal += t.realized;
+    }
+  });
+
+  // 總計：市值/未實現只計入有收盤價的；今日利差 = Σ(持股×漲跌)，比照媽媽 Excel
+  let totalMarket = 0, totalCostPriced = 0, pricedCount = 0;
+  let totalDayDiff = 0, dayDataCount = 0;
+  held.forEach(h=>{
+    const p = prices[h.code];
+    if(p != null){
+      totalMarket += h.qty * p; totalCostPriced += h.cost; pricedCount++;
+      const pc = getPrev(h.code);
+      if(pc != null){ totalDayDiff += h.qty * (p - pc); dayDataCount++; }
+    }
+  });
+  const totalUnrl = totalMarket - totalCostPriced;
+  const totalRealized = Object.values(realizedByCode).reduce((a,b)=>a+b, 0);
+  const hasDayData = dayDataCount > 0;
+  const grandDiff = (hasDayData ? totalDayDiff : 0) + todayRealizedTotal; // 利差合計
+
   /* ---- 投資總覽 ---- */
   const sum = document.getElementById('holdSummary');
   if(held.length === 0){
     sum.innerHTML = '<div class="empty">目前沒有庫存</div>';
   } else if(pricedCount === 0){
     sum.innerHTML = `
-      <div class="sum-line"><span class="k">買賣利差（已實現損益）</span><span class="v ${sgn(totalRealized)}">${signed(totalRealized)}</span></div>
-      <div class="sum-note">尚未填入任何收盤價，請到下方「更新收盤價」填入當日收盤價，即可看到總市值與未實現損益。</div>`;
+      <div class="sum-line"><span class="k">今日買賣利差（今天賣出）</span><span class="v ${sgn(todayRealizedTotal)}">${signed(todayRealizedTotal)}</span></div>
+      <div class="sum-line"><span class="k">累計買賣利差（已實現）</span><span class="v ${sgn(totalRealized)}">${signed(totalRealized)}</span></div>
+      <div class="sum-note">尚未填入任何收盤價，請到下方「更新收盤價」或按「自動抓收盤價」，即可看到總市值、未實現損益與今日利差。</div>`;
   } else {
-    let cmp;
-    if(prevTotal != null){
-      const diff = totalMarket - prevTotal;
-      const diffPct = prevTotal > 0 ? diff/prevTotal*100 : 0;
-      cmp = `<div class="sum-line"><span class="k">今日利差（較 ${prevDate.slice(5).replace('-','/')}）</span><span class="v ${sgn(diff)}">${signed(diff)}<span class="pct">${pct(diffPct)}</span></span></div>`;
-    } else {
-      cmp = `<div class="sum-line"><span class="k">今日利差</span><span class="v" style="font-size:13px;color:var(--ink-soft);font-weight:600;">尚無前一日可比較</span></div>`;
-    }
     const unrlPct = totalCostPriced > 0 ? totalUnrl/totalCostPriced*100 : 0;
+    const dayDiffLine = hasDayData
+      ? `<div class="sum-line"><span class="k">今日利差（持股×漲跌）</span><span class="v ${sgn(totalDayDiff)}">${signed(totalDayDiff)}</span></div>`
+      : `<div class="sum-line"><span class="k">今日利差</span><span class="v" style="font-size:13px;color:var(--ink-soft);font-weight:600;">尚無前一日可比較</span></div>`;
     sum.innerHTML = `
       <div class="sum-line"><span class="k">今日總市值</span><span class="v big mono">${fmt(totalMarket)}</span></div>
-      ${cmp}
-      <div class="sum-line"><span class="k">未實現損益</span><span class="v ${sgn(totalUnrl)}">${signed(totalUnrl)}<span class="pct">${pct(unrlPct)}</span></span></div>
-      <div class="sum-line"><span class="k">買賣利差（已實現損益）</span><span class="v ${sgn(totalRealized)}">${signed(totalRealized)}</span></div>
-      <div class="sum-note">總市值與未實現損益僅計入已填收盤價的 ${pricedCount} / ${held.length} 檔。「今日利差」是總市值較前一日的增減；「買賣利差」是過去賣出的已實現損益；股息已沖抵成本、反映在未實現損益。</div>`;
+      <div class="sum-line"><span class="k">未實現損益（總損益）</span><span class="v ${sgn(totalUnrl)}">${signed(totalUnrl)}<span class="pct">${pct(unrlPct)}</span></span></div>
+      ${dayDiffLine}
+      <div class="sum-line"><span class="k">今日買賣利差（今天賣出）</span><span class="v ${sgn(todayRealizedTotal)}">${signed(todayRealizedTotal)}</span></div>
+      <div class="sum-line"><span class="k">利差合計</span><span class="v ${sgn(grandDiff)}">${signed(grandDiff)}</span></div>
+      <div class="sum-line"><span class="k">累計買賣利差（已實現）</span><span class="v ${sgn(totalRealized)}">${signed(totalRealized)}</span></div>
+      <div class="sum-note">總市值與今日利差僅計入已填收盤價的 ${pricedCount} / ${held.length} 檔。「今日利差」＝每檔 持股×漲跌 加總；「今日買賣利差」＝今天賣出的已實現；「利差合計」＝兩者相加；「累計買賣利差」＝歷史全部已實現；股息已沖抵成本、反映在未實現損益。</div>`;
   }
 
   /* ---- 各檔持股 ---- */
@@ -1089,8 +1098,8 @@ function renderHoldings(){
       unrlHtml = `<div class="hi-unrl none">未填收盤價</div>`;
       marketStr = '';
     }
-    const realized = realizedByCode[h.code];
-    const realizedStr = realized ? `｜買賣利差 <span class="${sgn(realized)}">${signed(realized)}</span>` : '';
+    const tRealized = todayRealizedByCode[h.code];
+    const realizedStr = tRealized ? `｜今日買賣利差 <span class="${sgn(tRealized)}">${signed(tRealized)}</span>` : '';
     // 今日漲跌與今日利差（今收 − 昨收，需已有前一日收盤價）
     let dayHtml = '';
     if(p != null){
